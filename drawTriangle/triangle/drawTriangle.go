@@ -5,7 +5,6 @@ import (
 	"log"
 	"unsafe"
 
-	"github.com/xlab/linmath"
 	vk "github.com/vulkan-go/vulkan"
 )
 
@@ -112,7 +111,7 @@ func VulkanInit(v *VulkanDeviceInfo, s *VulkanSwapchainInfo,
 		offsets := make([]vk.DeviceSize, len(vb.buffers))
 		vk.CmdBindVertexBuffers(r.cmdBuffers[i], 0, 1, vb.buffers, offsets)
 		vk.CmdBindIndexBuffer(r.cmdBuffers[i], ib.buffers[0], 0, vk.IndexTypeUint16);
-		vk.CmdDrawIndexed(r.cmdBuffers[i], 6, 1, 0, 0, 0)
+		vk.CmdDrawIndexed(r.cmdBuffers[i], triCount * 3, 1, 0, 0, 0)
 		vk.CmdEndRenderPass(r.cmdBuffers[i])
 
 		ret = vk.EndCommandBuffer(r.cmdBuffers[i])
@@ -738,17 +737,10 @@ func (v VulkanDeviceInfo) CreateVertexBuffers() (VulkanBufferInfo, error) {
 
 	// Phase 1: vk.CreateBuffer
 	//			create the triangle vertex buffer
-
-	vertexData := linmath.ArrayFloat32([]float32{
-		-0.8, 0.8, 0,	1, 0, 0, // Y-up is -1 in Vulkan
-		0.8, 0.8, 0, 0, 1, 0,
-		-0.8, -0.8, 0, 0, 0, 1,
-		0.8, -0.8, 0, 0.5, 0.5, 0.5,
-	})
 	queueFamilyIdx := []uint32{0}
 	vertexBufferCreateInfo := vk.BufferCreateInfo{
 		SType:                 vk.StructureTypeBufferCreateInfo,
-		Size:                  vk.DeviceSize(vertexData.Sizeof()),
+		Size:                  vk.DeviceSize(gVertexData.Sizeof()),
 		Usage:                 vk.BufferUsageFlags(vk.BufferUsageVertexBufferBit),
 		SharingMode:           vk.SharingModeExclusive,
 		QueueFamilyIndexCount: 1,
@@ -791,9 +783,9 @@ func (v VulkanDeviceInfo) CreateVertexBuffers() (VulkanBufferInfo, error) {
 		return vertexBuffer, err
 	}
 	var vertexDataPtr unsafe.Pointer
-	vk.MapMemory(v.Device, vertexDeviceMemory, 0, vk.DeviceSize(vertexData.Sizeof()), 0, &vertexDataPtr)
-	n := vk.Memcopy(vertexDataPtr, vertexData.Data())
-	if n != vertexData.Sizeof() {
+	vk.MapMemory(v.Device, vertexDeviceMemory, 0, vk.DeviceSize(gVertexData.Sizeof()), 0, &vertexDataPtr)
+	n := vk.Memcopy(vertexDataPtr, gVertexData.Data())
+	if n != gVertexData.Sizeof() {
 		log.Println("[WARN] failed to copy vertex buffer data")
 	}
 	vk.UnmapMemory(v.Device, vertexDeviceMemory)
@@ -815,14 +807,10 @@ func (v VulkanDeviceInfo) CreateIndexBuffers() (VulkanBufferInfo, error) {
 
 	// Phase 1: vk.CreateBuffer
 	//			create the triangle vertex buffer
-
-	indexData := linmath.ArrayUint16([]uint16{
-		1, 0, 2, 1, 2, 3,
-	})
 	queueFamilyIdx := []uint32{0}
 	indexBufferCreateInfo := vk.BufferCreateInfo{
 		SType:                 vk.StructureTypeBufferCreateInfo,
-		Size:                  vk.DeviceSize(indexData.Sizeof()),
+		Size:                  vk.DeviceSize(gIndexData.Sizeof()),
 		Usage:                 vk.BufferUsageFlags(vk.BufferUsageVertexBufferBit),
 		SharingMode:           vk.SharingModeExclusive,
 		QueueFamilyIndexCount: 1,
@@ -865,9 +853,9 @@ func (v VulkanDeviceInfo) CreateIndexBuffers() (VulkanBufferInfo, error) {
 		return indexBuffer, err
 	}
 	var indexDataPtr unsafe.Pointer
-	vk.MapMemory(v.Device, indexDeviceMemory, 0, vk.DeviceSize(indexData.Sizeof()), 0, &indexDataPtr)
-	n := vk.Memcopy(indexDataPtr, indexData.Data())
-	if n != indexData.Sizeof() {
+	vk.MapMemory(v.Device, indexDeviceMemory, 0, vk.DeviceSize(gIndexData.Sizeof()), 0, &indexDataPtr)
+	n := vk.Memcopy(indexDataPtr, gIndexData.Data())
+	if n != gIndexData.Sizeof() {
 		log.Println("[WARN] failed to copy vertex buffer data")
 	}
 	vk.UnmapMemory(v.Device, indexDeviceMemory)
