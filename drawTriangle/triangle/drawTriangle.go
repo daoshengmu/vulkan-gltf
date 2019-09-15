@@ -111,7 +111,7 @@ func VulkanInit(v *VulkanDeviceInfo, s *VulkanSwapchainInfo,
 		offsets := make([]vk.DeviceSize, len(vb.buffers))
 		vk.CmdBindVertexBuffers(r.cmdBuffers[i], 0, 1, vb.buffers, offsets)
 		vk.CmdBindIndexBuffer(r.cmdBuffers[i], ib.buffers[0], 0, vk.IndexTypeUint16);
-		vk.CmdDrawIndexed(r.cmdBuffers[i], triCount * 3, 1, 0, 0, 0)
+		vk.CmdDrawIndexed(r.cmdBuffers[i], (uint32)(len(gIndexData)), 1, 0, 0, 0)
 		vk.CmdEndRenderPass(r.cmdBuffers[i])
 
 		ret = vk.EndCommandBuffer(r.cmdBuffers[i])
@@ -253,6 +253,9 @@ func CreateGraphicsPipeline(device vk.Device,
 		AttachmentCount: 1,
 		PAttachments:    attachmentStates,
 	}
+
+	// FrontFaceClockwise is by default in Vulkan?
+	// Otherwise, we need to flip projection matrix from GL to Vulkan orientation.
 	rasterState := vk.PipelineRasterizationStateCreateInfo{
 		SType:                   vk.StructureTypePipelineRasterizationStateCreateInfo,
 		DepthClampEnable:        vk.False,
