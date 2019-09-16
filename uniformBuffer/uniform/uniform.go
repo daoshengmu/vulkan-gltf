@@ -39,8 +39,8 @@ type VulkanSwapchainInfo struct {
 	DisplayViews []vk.ImageView
 
 	DescLayout 		vk.DescriptorSetLayout
-	descPool 			vk.DescriptorPool
-	descriptorSet	[]vk.DescriptorSet
+	DescPool 			vk.DescriptorPool
+	DescriptorSet	[]vk.DescriptorSet
 }
 
 type VulkanRenderInfo struct {
@@ -52,7 +52,6 @@ type VulkanRenderInfo struct {
 	semaphores []vk.Semaphore
 	fences     []vk.Fence
 
-	modelMatrix linmath.Mat4x4
 	viewMatrix	linmath.Mat4x4
 	projectionMatrix linmath.Mat4x4
 }
@@ -67,7 +66,7 @@ type VulkanGfxPipelineInfo struct {
 
 	pipelineLayout   vk.PipelineLayout
 	pipelineCache    vk.PipelineCache
-	pipeline vk.Pipeline
+	pipeline 				 vk.Pipeline
 }
 
 func (v *VulkanSwapchainInfo) DefaultSwapchain() vk.Swapchain {
@@ -119,9 +118,8 @@ func VulkanInit(v *VulkanDeviceInfo, s *VulkanSwapchainInfo,
 		vk.CmdBeginRenderPass(r.cmdBuffers[i], &renderPassBeginInfo, vk.SubpassContentsInline)
 		vk.CmdBindPipeline(r.cmdBuffers[i], vk.PipelineBindPointGraphics, gfx.pipeline)
 		offsets := make([]vk.DeviceSize, len(vb.buffers))
-		// TODO: CmdBindDescriptorSets
 		vk.CmdBindDescriptorSets(r.cmdBuffers[i], vk.PipelineBindPointGraphics, gfx.pipelineLayout,
-			0, 1, []vk.DescriptorSet{s.descriptorSet[i]}, 0, nil)
+			0, 1, []vk.DescriptorSet{s.DescriptorSet[i]}, 0, nil)
 
 		vk.CmdBindVertexBuffers(r.cmdBuffers[i], 0, 1, vb.buffers, offsets)
 		vk.CmdBindIndexBuffer(r.cmdBuffers[i], ib.buffers[0], 0, vk.IndexTypeUint16);
@@ -353,7 +351,7 @@ func CreateGraphicsPipeline(device vk.Device,
 }
 
 func VulkanDrawFrame(v VulkanDeviceInfo,
-	s VulkanSwapchainInfo, r VulkanRenderInfo) bool {
+	s VulkanSwapchainInfo, r VulkanRenderInfo, spinAngle float32) bool {
 	var nextIdx uint32
 
 	// Phase 1: vk.AcquireNextImage
@@ -370,11 +368,13 @@ func VulkanDrawFrame(v VulkanDeviceInfo,
 		return false
 	}
 
-	// // Rotate cube and set uniform buffer
+	// Rotate cube and set uniform buffer
 	var MVP linmath.Mat4x4
-//	r.modelMatrix.Rotate(&r.modelMatrix, 0.0, 1.0, 0.0, linmath.DegreesToRadians(15))
+	var modelMatrix linmath.Mat4x4
+	modelMatrix.Identity()
+	modelMatrix.Rotate(&modelMatrix, 0.0, 1.0, 0.0, linmath.DegreesToRadians(spinAngle))
 	MVP.Mult(&r.projectionMatrix, &r.viewMatrix)
-	MVP.Mult(&MVP, &r.modelMatrix)
+	MVP.Mult(&MVP, &modelMatrix)
 	data := MVP.Data()
 	var pData unsafe.Pointer
 
@@ -445,7 +445,7 @@ func (r *VulkanRenderInfo) CreateCommandBuffers(n uint32) error {
 	return nil
 }
 
-func CreateRenderer(device vk.Device, displayFormat vk.Format) (VulkanRenderInfo, error) {
+func CreateRenderer(device vk.Device, displayFormat vk.Format, aspect float32) (VulkanRenderInfo, error) {
 	attachmentDescriptions := []vk.AttachmentDescription{{
 		Format:         displayFormat,
 		Samples:        vk.SampleCount1Bit,
@@ -494,9 +494,8 @@ func CreateRenderer(device vk.Device, displayFormat vk.Format) (VulkanRenderInfo
 	origin := &linmath.Vec3{0.0, 0.0, 0.0}
 	upVec := &linmath.Vec3{0.0, 1.0, 0.0}
 
-	r.projectionMatrix.Perspective(linmath.DegreesToRadians(45.0), 1.0, 0.1, 100.0);
+	r.projectionMatrix.Perspective(linmath.DegreesToRadians(45.0), aspect, 0.1, 100.0);
 	r.viewMatrix.LookAt(eyeVec, origin, upVec)
-	r.modelMatrix.Identity()
 	r.projectionMatrix[1][1] *= -1 // Flip projection matrix from GL to Vulkan orientation.
 
 	r.device = device
@@ -872,6 +871,7 @@ func (v *VulkanDeviceInfo) CreateSwapchain() (VulkanSwapchainInfo, error) {
 	}
 	var imageCount uint32 = s.SwapchainLen[0];
 	s.uniformBuffer = make([]UniformBuffer, imageCount)
+
 	// create uniform buffer.
 	for i := uint32(0); i < imageCount; i++ {
 		buffer, err := v.CreateUniformBuffers();
@@ -879,29 +879,6 @@ func (v *VulkanDeviceInfo) CreateSwapchain() (VulkanSwapchainInfo, error) {
 		s.uniformBuffer[i].Memory = buffer.Memory;
 		orPanic(err)
 	}
-
-	// // TODO: 	s.prepareDescriptorPool()
-	// //	vk.CreateDescriptorPool
-  // var descPool vk.DescriptorPool
-	// ret := vk.CreateDescriptorPool(dev, &vk.DescriptorPoolCreateInfo{
-	// 	SType:         vk.StructureTypeDescriptorPoolCreateInfo,
-	// 	MaxSets:       uint32(s.SwapchainLen[0]),
-	// 	PoolSizeCount: 2,
-	// 	PPoolSizes: []vk.DescriptorPoolSize{{
-	// 		Type:            vk.DescriptorTypeUniformBuffer,
-	// 		DescriptorCount: uint32(len(swapchainImageResources)),
-	// 	}, {
-	// 		Type:            vk.DescriptorTypeCombinedImageSampler,
-	// 		DescriptorCount: uint32(len(swapchainImageResources) * len(texEnabled)),
-	// 	}},
-	// }, nil, &descPool)
-	// orPanic(as.NewError(ret))
-	// s.descPool = descPool
-
-
-	// Phase 6:
-	//     s.prepareDescriptorSet()
-	//			vk.AllocateDescriptorSets
 
 	for i := range formats {
 		formats[i].Free()
@@ -1053,7 +1030,6 @@ func (v VulkanDeviceInfo) CreateIndexBuffers() (VulkanBufferInfo, error) {
 
 type UniformBuffer struct {
 	// device for destroy purposes.
-	//Device vk.Device
 	// Buffer is the buffer object.
 	Buffer vk.Buffer
 	// Memory is the device memory backing buffer object.
@@ -1072,36 +1048,24 @@ func (s *VulkanSwapchainInfo) CreateDescriptorPool() error {
 			DescriptorCount: uint32(s.SwapchainLen[0]),
 		}},
 	}, nil, &descPool)
-	// orPanic(as.NewError(ret))
 	err := vk.Error(ret)
 	if (err != nil) {
 		return fmt.Errorf("vk.CreateDescriptorPool failed with %s", err)
 	}
 
-	s.descPool = descPool
+	s.DescPool = descPool
 	return nil
 }
 
 func (s *VulkanSwapchainInfo) CreateDescriptorSet() error{
 	dev := s.Device
-//	swapchainImageResources := s.Context().SwapchainImageResources()
 
-	// texInfos := make([]vk.DescriptorImageInfo, 0, len(s.textures))
-	// for _, tex := range s.textures {
-	// 	texInfos = append(texInfos, vk.DescriptorImageInfo{
-	// 		Sampler:     tex.sampler,
-	// 		ImageView:   tex.view,
-	// 		ImageLayout: vk.ImageLayoutGeneral,
-	// 	})
-	// }
-
-	s.descriptorSet = make([]vk.DescriptorSet, s.SwapchainLen[0])
+	s.DescriptorSet = make([]vk.DescriptorSet, s.SwapchainLen[0])
 	for i := uint32(0); i < s.SwapchainLen[0]; i++ {
-	//for _, res := range swapchainImageResources {
 		var set vk.DescriptorSet
 		ret := vk.AllocateDescriptorSets(dev, &vk.DescriptorSetAllocateInfo{
 			SType:              vk.StructureTypeDescriptorSetAllocateInfo,
-			DescriptorPool:     s.descPool,
+			DescriptorPool:     s.DescPool,
 			DescriptorSetCount: 1,
 			PSetLayouts:        []vk.DescriptorSetLayout{s.DescLayout},
 		}, &set)
@@ -1110,7 +1074,7 @@ func (s *VulkanSwapchainInfo) CreateDescriptorSet() error{
 			return fmt.Errorf("vk.AllocateDescriptorSets failed with %s", err)
 		}
 
-		s.descriptorSet[i] = set
+		s.DescriptorSet[i] = set
 
 		vk.UpdateDescriptorSets(dev, 1, []vk.WriteDescriptorSet{{
 			SType:           vk.StructureTypeWriteDescriptorSet,
@@ -1211,16 +1175,19 @@ func (gfx *VulkanGfxPipelineInfo) Destroy() {
 	vk.DestroyPipeline(gfx.device, gfx.pipeline, nil)
 	vk.DestroyPipelineCache(gfx.device, gfx.pipelineCache, nil)
 	vk.DestroyPipelineLayout(gfx.device, gfx.pipelineLayout, nil)
-	// vk.DestroyDescriptorSetLayout(gfx.device, gfx.descLayout, nil)
-	// TODO destroy descripterPool, desriptorSet, descLayout
 }
 
 func (s *VulkanSwapchainInfo) Destroy() {
 	for i := uint32(0); i < s.DefaultSwapchainLen(); i++ {
+		vk.DestroyBuffer(s.Device, s.uniformBuffer[i].Buffer, nil)
+		vk.FreeMemory(s.Device, s.uniformBuffer[i].Memory, nil)
 		vk.DestroyFramebuffer(s.Device, s.Framebuffers[i], nil)
 		vk.DestroyImageView(s.Device, s.DisplayViews[i], nil)
+		vk.FreeDescriptorSets(s.Device, s.DescPool, i, &s.DescriptorSet[i])
 	}
-	// TODO: Destroy ub.
+
+	vk.DestroyDescriptorSetLayout(s.Device, s.DescLayout, nil)
+	vk.DestroyDescriptorPool(s.Device, s.DescPool, nil)
 
 	s.Framebuffers = nil
 	s.DisplayViews = nil
@@ -1242,7 +1209,6 @@ func DestroyInOrder(v *VulkanDeviceInfo, s *VulkanSwapchainInfo,
 	gfx.Destroy()
 	vb.Destroy()
 	ib.Destroy()
-	// ub.Destroy()
 	vk.DestroyDevice(v.Device, nil)
 	if v.dbg != vk.NullDebugReportCallback {
 		vk.DestroyDebugReportCallback(v.Instance, v.dbg, nil)

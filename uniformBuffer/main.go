@@ -42,13 +42,14 @@ func main() {
 		r   uniform.VulkanRenderInfo
 		vb  uniform.VulkanBufferInfo
 		ib  uniform.VulkanBufferInfo
-		// ub  uniform.Buffer
-	//	um	vk.DeviceMemory
 		gfx uniform.VulkanGfxPipelineInfo
 	)
 
 	glfw.WindowHint(glfw.ClientAPI, glfw.NoAPI)
-	window, err := glfw.CreateWindow(640, 480, "Vulkan Info", nil, nil)
+	const width = 640
+	const height = 480
+
+	window, err := glfw.CreateWindow(width, height, "Vulkan uniform buffer", nil, nil)
 	orPanic(err)
 
 	createSurface := func(instance interface{}) uintptr {
@@ -65,7 +66,7 @@ func main() {
 
 	s, err = v.CreateSwapchain()
 	orPanic(err)
-	r, err = uniform.CreateRenderer(v.Device, s.DisplayFormat)
+	r, err = uniform.CreateRenderer(v.Device, s.DisplayFormat, float32(width)/float32(height))
 	orPanic(err)
 	err = s.CreateDescriptorPool()
 	orPanic(err)
@@ -77,11 +78,6 @@ func main() {
 	orPanic(err)
 	ib, err = v.CreateIndexBuffers()
 	orPanic(err)
-	// create uniform buffer and MVP matrix.
-	//var buf *uniform.Buffer
-	// buf, err = v.CreateUniformBuffers()
-	// ub = *buf;
-	// orPanic(err)
 
 	gfx, err = uniform.CreateGraphicsPipeline(v.Device, s.DisplaySize, r.RenderPass, s.DescLayout)
 	orPanic(err)
@@ -101,6 +97,8 @@ func main() {
 
 	fpsDelay := time.Second / 60
 	fpsTicker := time.NewTicker(fpsDelay)
+	spinAngle := float32(1.0)
+
 	for {
 		select {
 		case <-exitC:
@@ -116,11 +114,8 @@ func main() {
 				continue
 			}
 			glfw.PollEvents()
-
-			// rotate cube
-			// set unifrom
-
-			uniform.VulkanDrawFrame(v, s, r)
+			uniform.VulkanDrawFrame(v, s, r, spinAngle)
+			spinAngle += 1.0
 		}
 	}
 }

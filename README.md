@@ -10,6 +10,7 @@ go-bindata shaders
 
 Change package name of bindata.go
 
-0. vertex/index buffer CmdBindVertexBuffers, CmdBindIndexBuffer
-1. uniform VkDescriptorSetLayoutBinding -> more efficient, push constant
-2. texture Vk.DescriptorSetLayoutBinding
+1. vertex/index buffer CmdBindVertexBuffers, VkCmdBindIndexBuffer
+2. uniform VkDescriptorSetLayoutBinding, VkCmdBindDescriptorSets
+VkCreateDescriptorPool VkAllocateDescriptorSets/VkUpdateDescriptorSets -> more efficient, push constant
+3. texture Vk.DescriptorSetLayoutBinding
