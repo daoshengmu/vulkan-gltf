@@ -9,7 +9,7 @@ type vkTriUniform struct {
 	mvp      linmath.Mat4x4
 }
 
-const vkTriUniformSize = int(unsafe.Sizeof(vkTriUniform{}))
+const vkTriUniformSize = uint32(unsafe.Sizeof(vkTriUniform{}))
 
 func (u *vkTriUniform) Data() []byte {
 	const m = 0x7fffffff

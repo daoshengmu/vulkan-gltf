@@ -37,12 +37,12 @@ func main() {
 	defer closer.Close()
 
 	var (
-		v   uniform.VulkanDeviceInfo
-		s   uniform.VulkanSwapchainInfo
+		// v   renderer.VulkanDeviceInfo
+		// s   renderer.VulkanSwapchainInfo
 		r   uniform.VulkanRenderInfo
-		vb  uniform.VulkanBufferInfo
-		ib  uniform.VulkanBufferInfo
-		gfx uniform.VulkanGfxPipelineInfo
+		// vb  renderer.VulkanBufferInfo
+		// ib  renderer.VulkanBufferInfo
+	//	gfx uniform.VulkanGfxPipelineInfo
 	)
 
 	glfw.WindowHint(glfw.ClientAPI, glfw.NoAPI)
@@ -58,32 +58,36 @@ func main() {
 		return surface
 	}
 
-	v, err = uniform.NewVulkanDevice(appInfo,
-		window.GLFWWindow(),
-		window.GetRequiredInstanceExtensions(),
-		createSurface)
-	orPanic(err)
+	// v, err = renderer.NewVulkanDevice(appInfo,
+	// 	window.GLFWWindow(),
+	// 	window.GetRequiredInstanceExtensions(),
+	// 	createSurface)
+	// orPanic(err)
 
-	s, err = v.CreateSwapchain()
+	// s, err = v.CreateSwapchain()
+	// orPanic(err)
+	// r, err = uniform.CreateRenderer(v.Device, s.DisplayFormat, float32(width)/float32(height))
+	// orPanic(err)
+	r, err = uniform.Initialize(appInfo, window.GLFWWindow(), window.GetRequiredInstanceExtensions(),
+														  createSurface, float32(width)/float32(height))
 	orPanic(err)
-	r, err = uniform.CreateRenderer(v.Device, s.DisplayFormat, float32(width)/float32(height))
-	orPanic(err)
-	err = s.CreateDescriptorPool()
-	orPanic(err)
-	err = s.CreateDescriptorSet()
-	orPanic(err)
-	err = s.CreateFramebuffers(r.RenderPass, nil)
-	orPanic(err)
-	vb, err = v.CreateVertexBuffers()
-	orPanic(err)
-	ib, err = v.CreateIndexBuffers()
-	orPanic(err)
+//	err = s.CreateDescriptorPool()
+//	orPanic(err)
+//	err = s.CreateDescriptorSet(vk.DeviceSize(uniform.UniformDataSize()))
+	//orPanic(err)
+//	err = s.CreateFramebuffers(r.RenderPass, nil)
+//	orPanic(err)
+	// vb, err = v.CreateVertexBuffers()
+	// orPanic(err)
+	// ib, err = v.CreateIndexBuffers()
+	// orPanic(err)
 
-	gfx, err = uniform.CreateGraphicsPipeline(v.Device, s.DisplaySize, r.RenderPass, s.DescLayout)
-	orPanic(err)
-	log.Println("[INFO] swapchain lengths:", s.SwapchainLen)
-	err = r.CreateCommandBuffers(s.DefaultSwapchainLen())
-	orPanic(err)
+	// TODO: move to uniform
+	// gfx, err = uniform.CreateGraphicsPipeline(v.Device, s.DisplaySize, r.RenderPass, s.DescLayout)
+	// orPanic(err)
+	// log.Println("[INFO] swapchain lengths:", s.SwapchainLen)
+	// err = r.CreateCommandBuffers(s.DefaultSwapchainLen())
+	// orPanic(err)
 
 	// Some sync logic
 	doneC := make(chan struct{}, 2)
@@ -93,7 +97,7 @@ func main() {
 		<-doneC
 		log.Println("Bye!")
 	})
-	uniform.VulkanInit(&v, &s, &r, &vb, &ib, &gfx)
+	// uniform.VulkanInit(&v, &s, &r, &vb, &ib, &gfx)
 
 	fpsDelay := time.Second / 60
 	fpsTicker := time.NewTicker(fpsDelay)
@@ -102,7 +106,8 @@ func main() {
 	for {
 		select {
 		case <-exitC:
-			uniform.DestroyInOrder(&v, &s, &r, &vb, &ib, &gfx)
+			// uniform.DestroyInOrder(&v, &s, &r, &vb, &ib, &gfx)
+			uniform.DestroyInOrder(&r)
 			window.Destroy()
 			glfw.Terminate()
 			fpsTicker.Stop()
@@ -114,7 +119,7 @@ func main() {
 				continue
 			}
 			glfw.PollEvents()
-			uniform.VulkanDrawFrame(v, s, r, spinAngle)
+			uniform.VulkanDrawFrame(r, spinAngle)
 			spinAngle += 1.0
 		}
 	}
