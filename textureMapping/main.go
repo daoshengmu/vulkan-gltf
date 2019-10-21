@@ -5,11 +5,12 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/vulkan-gltf/uniformBuffer/uniform"
+	"github.com/vulkan-gltf/textureMapping/texture"
 
 	"github.com/vulkan-go/glfw/v3.3/glfw"
 	vk "github.com/vulkan-go/vulkan"
 	"github.com/xlab/closer"
+	"github.com/vulkan-gltf/util"
 )
 
 var appInfo = &vk.ApplicationInfo{
@@ -32,12 +33,12 @@ func main() {
 	}
 	vk.SetGetInstanceProcAddr(procAddr)
 
-	orPanic(glfw.Init())
-	orPanic(vk.Init())
+	util.OrPanic(glfw.Init())
+	util.OrPanic(vk.Init())
 	defer closer.Close()
 
 	var (
-		r   uniform.VulkanRenderInfo
+		r   texture.VulkanRenderInfo
 	)
 
 	glfw.WindowHint(glfw.ClientAPI, glfw.NoAPI)
@@ -45,17 +46,17 @@ func main() {
 	const height = 480
 
 	window, err := glfw.CreateWindow(width, height, "Vulkan uniform buffer", nil, nil)
-	orPanic(err)
+	util.OrPanic(err)
 
 	createSurface := func(instance interface{}) uintptr {
 		surface, err := window.CreateWindowSurface(instance, nil)
-		orPanic(err)
+		util.OrPanic(err)
 		return surface
 	}
 
-	r, err = uniform.Initialize(appInfo, window.GLFWWindow(), window.GetRequiredInstanceExtensions(),
+	r, err = texture.Initialize(appInfo, window.GLFWWindow(), window.GetRequiredInstanceExtensions(),
 														  createSurface, float32(width)/float32(height))
-	orPanic(err)
+	util.OrPanic(err)
 
 	// Some sync logic
 	doneC := make(chan struct{}, 2)
@@ -73,7 +74,7 @@ func main() {
 	for {
 		select {
 		case <-exitC:
-			uniform.DestroyInOrder(&r)
+			texture.DestroyInOrder(&r)
 			window.Destroy()
 			glfw.Terminate()
 			fpsTicker.Stop()
@@ -85,25 +86,8 @@ func main() {
 				continue
 			}
 			glfw.PollEvents()
-			uniform.VulkanDrawFrame(r, spinAngle)
+			texture.VulkanDrawFrame(r, spinAngle)
 			spinAngle += 1.0
-		}
-	}
-}
-
-func orPanic(err interface{}) {
-	switch v := err.(type) {
-	case error:
-		if v != nil {
-			panic(err)
-		}
-	case vk.Result:
-		if err := vk.Error(v); err != nil {
-			panic(err)
-		}
-	case bool:
-		if !v {
-			panic("condition failed: != true")
 		}
 	}
 }

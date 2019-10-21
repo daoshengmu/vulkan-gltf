@@ -296,7 +296,7 @@ func CreateGraphicsPipeline(device vk.Device,
 		SType:                           vk.StructureTypePipelineVertexInputStateCreateInfo,
 		VertexBindingDescriptionCount:   1,
 		PVertexBindingDescriptions:      vertexInputBindings,
-		VertexAttributeDescriptionCount: uint32(len(vertexInputAttributes)),//1,
+		VertexAttributeDescriptionCount: uint32(len(vertexInputAttributes)),//2,
 		PVertexAttributeDescriptions:    vertexInputAttributes,
 	}
 

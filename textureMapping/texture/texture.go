@@ -1,4 +1,4 @@
-package uniform
+package texture
 
 import (
 	"fmt"
@@ -28,6 +28,7 @@ type VulkanRenderInfo struct {
 
 	viewMatrix	linmath.Mat4x4
 	projectionMatrix linmath.Mat4x4
+	textures []*renderer.Texture
 }
 
 type VulkanGfxPipelineInfo struct {
@@ -245,26 +246,32 @@ func createGraphicsPipeline(device vk.Device,
 	}
 	vertexInputBindings := []vk.VertexInputBindingDescription{{
 		Binding:   0,
-		Stride:    6 * 4, // 4 = sizeof(float32)
+		Stride:    8 * 4, // 4 = sizeof(float32) (pos, color, uv: 8)
 		InputRate: vk.VertexInputRateVertex,
 	}}
 	vertexInputAttributes := []vk.VertexInputAttributeDescription{{
-		Binding:  0,
+		Binding:  0,  // pos
 		Location: 0,
 		Format:   vk.FormatR32g32b32Sfloat,
 		Offset:   0,
 	},
 	{
-		Binding:  0,
+		Binding:  0,  // color
 		Location: 1,
 		Format:   vk.FormatR32g32b32Sfloat,
 		Offset:   3 * 4, // 4 = sizeof(float32)
+	},
+	{
+		Binding:  0, // texcoord
+		Location: 2,
+		Format:   vk.FormatR32g32Sfloat,
+		Offset:   6 * 4, // 4 = sizeof(float32)
 	}}
 	vertexInputState := vk.PipelineVertexInputStateCreateInfo{
 		SType:                           vk.StructureTypePipelineVertexInputStateCreateInfo,
 		VertexBindingDescriptionCount:   1,
 		PVertexBindingDescriptions:      vertexInputBindings,
-		VertexAttributeDescriptionCount: uint32(len(vertexInputAttributes)),//1,
+		VertexAttributeDescriptionCount: uint32(len(vertexInputAttributes)), //3,
 		PVertexAttributeDescriptions:    vertexInputAttributes,
 	}
 
@@ -465,7 +472,7 @@ func Initialize(appInfo *vk.ApplicationInfo, window uintptr, instanceExtensions 
 		mvp: MVP,
 	}
 
-	s, err = v.CreateSwapchain(uniformData.Data(), make([]*renderer.Texture, 0, 0))
+	s, err = v.CreateSwapchain(uniformData.Data(), r.textures)
 	if err != nil {
 		err = fmt.Errorf("renderer.CreateSwapchain failed with %s", err)
 		return r, err
@@ -475,14 +482,12 @@ func Initialize(appInfo *vk.ApplicationInfo, window uintptr, instanceExtensions 
 		err = fmt.Errorf("renderer.createRenderer failed with %s", err)
 		return r, err
 	}
-	err = s.CreateDescriptorPool(make([]*renderer.Texture, 0, 0))
+	err = s.CreateDescriptorPool(r.textures)
 	if err != nil {
 		err = fmt.Errorf("renderer.CreateDescriptorPool failed with %s", err)
 		return r, err
 	}
-
-	// We don't use any textures in descriptor.
-	err = s.CreateDescriptorSet(vk.DeviceSize(len(uniformData.Data())), make([]*renderer.Texture, 0, 0))
+	err = s.CreateDescriptorSet(vk.DeviceSize(len(uniformData.Data())), r.textures)
 	if err != nil {
 		err = fmt.Errorf("renderer.CreateDescriptorSet failed with %s", err)
 		return r, err
@@ -513,9 +518,21 @@ func Initialize(appInfo *vk.ApplicationInfo, window uintptr, instanceExtensions 
 		err = fmt.Errorf("renderer.CreateCommandBuffers failed with %s", err)
 		return r, err
 	}
+	// Create texture
+	r.textures = append(r.textures, v.CreateTexture(MustAsset("res/brick.jpg")))
+
+	for _, tex := range r.textures {
+		v.SetImageLayout(tex, r.cmdBuffers[0])
+	}
 
 	vulkanInit()
 
+	// TODO
+	//  and UpdateDescriptorSets
+	// create DescriptorImageInfo in prepareDescriptorSet
+
+	// prepareDescriptorLayout CreateDescriptorSetLayout
+	// prepareDescriptorPool
 	return r, nil
 }
 
@@ -539,6 +556,11 @@ func DestroyInOrder(r *VulkanRenderInfo) {
 
 	vk.DestroyCommandPool(v.Device, r.cmdPool, nil)
 	vk.DestroyRenderPass(v.Device, r.RenderPass, nil)
+
+	// destroy texture
+	for _, tex := range r.textures {
+		tex.Destroy(v.Device)
+	}
 
 	s.Destroy()
 	gfx.Destroy()

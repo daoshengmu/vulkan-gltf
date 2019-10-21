@@ -1,10 +1,16 @@
 package renderer
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"unsafe"
+	"errors"
+	"image"
+	"image/draw"
+	"image/jpeg"
 
+	as "github.com/vulkan-go/asche"
 	vk "github.com/vulkan-go/vulkan"
 	"github.com/vulkan-gltf/util"
 )
@@ -14,6 +20,27 @@ import (
 // Nvidia Shield K1 fw 1.3.0 lacks this extension,
 // on fw 1.2.0 it works fine.
 const enableDebug = false
+
+type Texture struct {
+	sampler vk.Sampler
+
+	image       vk.Image
+	imageLayout vk.ImageLayout
+
+	memAlloc *vk.MemoryAllocateInfo
+	mem      vk.DeviceMemory
+	view     vk.ImageView
+
+	texWidth  int32
+	texHeight int32
+}
+
+func (t *Texture) Destroy(dev vk.Device) {
+	vk.DestroyImageView(dev, t.view, nil)
+	vk.FreeMemory(dev, t.mem, nil)
+	vk.DestroyImage(dev, t.image, nil)
+	vk.DestroySampler(dev, t.sampler, nil)
+}
 
 func NewVulkanDevice(appInfo *vk.ApplicationInfo, window uintptr, instanceExtensions []string, createSurfaceFunc func(interface{}) uintptr) (VulkanDeviceInfo, error) {
 	// Phase 1: vk.CreateInstance with vk.InstanceCreateInfo
@@ -245,16 +272,25 @@ func (v *VulkanSwapchainInfo) DefaultSwapchainLen() uint32 {
 	return v.SwapchainLen[0]
 }
 
-func (s *VulkanSwapchainInfo) CreateDescriptorPool() error {
+func (s *VulkanSwapchainInfo) CreateDescriptorPool(textures []*Texture) error {
 	dev := s.Device
+
+	var poolCount = uint32(1)
+	if (len(textures) > 0) {
+		poolCount += 1
+	}
+
 	var descPool vk.DescriptorPool
 	ret := vk.CreateDescriptorPool(dev, &vk.DescriptorPoolCreateInfo{
 		SType:         vk.StructureTypeDescriptorPoolCreateInfo,
 		MaxSets:       uint32(s.SwapchainLen[0]),
-		PoolSizeCount: 1,
-		PPoolSizes: []vk.DescriptorPoolSize{{
+		PoolSizeCount: poolCount,
+		PPoolSizes: 	 []vk.DescriptorPoolSize{{
 			Type:            vk.DescriptorTypeUniformBuffer,
 			DescriptorCount: uint32(s.SwapchainLen[0]),
+		}, {
+			Type:            vk.DescriptorTypeCombinedImageSampler,
+			DescriptorCount: uint32(s.SwapchainLen[0]) * uint32(len(textures)),
 		}},
 	}, nil, &descPool)
 	err := vk.Error(ret)
@@ -266,8 +302,18 @@ func (s *VulkanSwapchainInfo) CreateDescriptorPool() error {
 	return nil
 }
 
-func (s *VulkanSwapchainInfo) CreateDescriptorSet(uniformSize vk.DeviceSize) error{
+func (s *VulkanSwapchainInfo) CreateDescriptorSet(uniformSize vk.DeviceSize, textures []*Texture) error{
 	dev := s.Device
+
+	// Create image info
+	texInfos := make([]vk.DescriptorImageInfo, 0, len(textures))
+	for _, tex := range textures {
+		texInfos = append(texInfos, vk.DescriptorImageInfo{
+			Sampler: tex.sampler,
+			ImageView: tex.view,
+			ImageLayout: vk.ImageLayoutGeneral,
+		})
+	}
 
 	s.DescriptorSet = make([]vk.DescriptorSet, s.SwapchainLen[0])
 	for i := uint32(0); i < s.SwapchainLen[0]; i++ {
@@ -285,16 +331,28 @@ func (s *VulkanSwapchainInfo) CreateDescriptorSet(uniformSize vk.DeviceSize) err
 
 		s.DescriptorSet[i] = set
 
-		vk.UpdateDescriptorSets(dev, 1, []vk.WriteDescriptorSet{{
+		var setCount = uint32(1)
+		if (len(textures) > 0) {
+			setCount += 1
+		}
+
+		vk.UpdateDescriptorSets(dev, setCount, []vk.WriteDescriptorSet{{
 			SType:           vk.StructureTypeWriteDescriptorSet,
 			DstSet:          set,
 			DescriptorCount: 1,
 			DescriptorType:  vk.DescriptorTypeUniformBuffer,
 			PBufferInfo: []vk.DescriptorBufferInfo{{
 				Offset: 0,
-				Range:  uniformSize,//vk.DeviceSize(vkTriUniformSize),
+				Range:  uniformSize,
 				Buffer: s.UniformBuffer[i].buffer,
 			}},
+			}, {
+				SType:           vk.StructureTypeWriteDescriptorSet,
+				DstBinding:      1,
+				DstSet:          set,
+				DescriptorCount: uint32(len(textures)),
+				DescriptorType:  vk.DescriptorTypeCombinedImageSampler,
+				PImageInfo:      texInfos,
 		}}, 0, nil)
 	}
 	return nil
@@ -434,13 +492,8 @@ func (v VulkanDeviceInfo) CreateUniformBuffers(uniformData []byte) (*UniformBuff
 
 	// Phase 1: vk.CreateBuffer
 	//			create the triangle vertex buffer
-	//var MVP linmath.Mat4x4
-	// uniformData := vkTriUniform{
-	// 	mvp: MVP,
-	// }
-	dataRaw := uniformData;//uniformData.Data()
+	dataRaw := uniformData;
 
-	//queueFamilyIdx := []uint32{0}
 	uniformBufferCreateInfo := vk.BufferCreateInfo{
 		SType:                 vk.StructureTypeBufferCreateInfo,
 		Size:                  vk.DeviceSize(len(dataRaw)),
@@ -511,20 +564,46 @@ func (v VulkanDeviceInfo) CreateUniformBuffers(uniformData []byte) (*UniformBuff
 	return buffer, err
 }
 
-func (v *VulkanDeviceInfo) CreateSwapchain(uniformData []byte) (VulkanSwapchainInfo, error) {
+func (v *VulkanDeviceInfo) CreateCommandBuffers(n uint32, cmdPool vk.CommandPool) ([]vk.CommandBuffer, error) {
+	cmdBuffers := make([]vk.CommandBuffer, n)
+	cmdBufferAllocateInfo := vk.CommandBufferAllocateInfo{
+		SType:              vk.StructureTypeCommandBufferAllocateInfo,
+		CommandPool:        cmdPool,
+		Level:              vk.CommandBufferLevelPrimary,
+		CommandBufferCount: n,
+	}
+	err := vk.Error(vk.AllocateCommandBuffers(v.Device, &cmdBufferAllocateInfo, cmdBuffers))
+	if err != nil {
+		err = fmt.Errorf("vk.AllocateCommandBuffers failed with %s", err)
+		return cmdBuffers, err
+	}
+	return cmdBuffers, nil
+}
+
+func (v *VulkanDeviceInfo) CreateSwapchain(uniformData []byte, textures []*Texture) (VulkanSwapchainInfo, error) {
 	gpu := v.gpuDevices[0]
 
 	var s VulkanSwapchainInfo
 	var descLayout vk.DescriptorSetLayout
+	var bindCount = uint32(1)
+	if (len(textures) > 0) {
+		bindCount += 1
+	}
+
 	ret := vk.CreateDescriptorSetLayout(v.Device, &vk.DescriptorSetLayoutCreateInfo{
 		SType:		vk.StructureTypeDescriptorSetLayoutCreateInfo,
-		BindingCount: 1,
+		BindingCount: bindCount,
 		PBindings: []vk.DescriptorSetLayoutBinding{
 		{
 			Binding: 0,
 			DescriptorType: vk.DescriptorTypeUniformBuffer,
 			DescriptorCount: 1,
 			StageFlags: vk.ShaderStageFlags(vk.ShaderStageVertexBit),
+		}, {
+			Binding:         1,
+			DescriptorType:  vk.DescriptorTypeCombinedImageSampler,
+			DescriptorCount: uint32(len(textures)),
+			StageFlags:      vk.ShaderStageFlags(vk.ShaderStageFragmentBit),
 		}},
 	}, nil, &descLayout)
 	s.DescLayout = descLayout
@@ -627,7 +706,7 @@ func (v VulkanDeviceInfo) CreateVertexBuffers(data []byte, size uint32) (VulkanB
 	queueFamilyIdx := []uint32{0}
 	vertexBufferCreateInfo := vk.BufferCreateInfo{
 		SType:                 vk.StructureTypeBufferCreateInfo,
-		Size:                  vk.DeviceSize(size),//gVertexData.Sizeof()),
+		Size:                  vk.DeviceSize(size),
 		Usage:                 vk.BufferUsageFlags(vk.BufferUsageVertexBufferBit),
 		SharingMode:           vk.SharingModeExclusive,
 		QueueFamilyIndexCount: 1,
@@ -671,9 +750,8 @@ func (v VulkanDeviceInfo) CreateVertexBuffers(data []byte, size uint32) (VulkanB
 	}
 	var vertexDataPtr unsafe.Pointer
 	vk.MapMemory(v.Device, vertexDeviceMemory, 0, vk.DeviceSize(size), 0, &vertexDataPtr)
-	// vk.MapMemory(v.Device, vertexDeviceMemory, 0, vk.DeviceSize(gVertexData.Sizeof()), 0, &vertexDataPtr)
-	n := vk.Memcopy(vertexDataPtr, data)//gVertexData.Data())
-	if n != int(size) {//gVertexData.Sizeof() {
+	n := vk.Memcopy(vertexDataPtr, data)
+	if n != int(size) {
 		log.Println("[WARN] failed to copy vertex buffer data")
 	}
 	vk.UnmapMemory(v.Device, vertexDeviceMemory)
@@ -698,7 +776,7 @@ func (v VulkanDeviceInfo) CreateIndexBuffers(data []byte, size uint32) (VulkanBu
 	queueFamilyIdx := []uint32{0}
 	indexBufferCreateInfo := vk.BufferCreateInfo{
 		SType:                 vk.StructureTypeBufferCreateInfo,
-		Size:                  vk.DeviceSize(size),//vk.DeviceSize(gIndexData.Sizeof()),
+		Size:                  vk.DeviceSize(size),
 		Usage:                 vk.BufferUsageFlags(vk.BufferUsageVertexBufferBit),
 		SharingMode:           vk.SharingModeExclusive,
 		QueueFamilyIndexCount: 1,
@@ -742,9 +820,8 @@ func (v VulkanDeviceInfo) CreateIndexBuffers(data []byte, size uint32) (VulkanBu
 	}
 	var indexDataPtr unsafe.Pointer
 	vk.MapMemory(v.Device, indexDeviceMemory, 0, vk.DeviceSize(size), 0, &indexDataPtr)
-	// vk.MapMemory(v.Device, indexDeviceMemory, 0, vk.DeviceSize(gIndexData.Sizeof()), 0, &indexDataPtr)
-	n := vk.Memcopy(indexDataPtr, data)//gIndexData.Data())
-	if n != int(size) {//gIndexData.Sizeof() {
+	n := vk.Memcopy(indexDataPtr, data)
+	if n != int(size) {
 		log.Println("[WARN] failed to copy index buffer data")
 	}
 	vk.UnmapMemory(v.Device, indexDeviceMemory)
@@ -760,3 +837,236 @@ func (v VulkanDeviceInfo) CreateIndexBuffers(data []byte, size uint32) (VulkanBu
 	indexBuffer.device = v.Device
 	return indexBuffer, err
 }
+
+func (v VulkanDeviceInfo) CreateTexture(rawData []byte) *Texture {
+	texFormat := vk.FormatR8g8b8a8Unorm
+	_, width, height, err := loadTextureData(rawData, 0)
+	if err != nil {
+		util.OrPanic(err)
+	}
+	tex := &Texture{
+		texWidth:    int32(width),
+		texHeight:   int32(height),
+		imageLayout: vk.ImageLayoutShaderReadOnlyOptimal,
+	}
+
+	var image vk.Image
+	ret := vk.CreateImage(v.Device, &vk.ImageCreateInfo{
+		SType:     vk.StructureTypeImageCreateInfo,
+		ImageType: vk.ImageType2d,
+		Format:    texFormat,
+		Extent: vk.Extent3D{
+			Width:  uint32(width),
+			Height: uint32(height),
+			Depth:  1,
+		},
+		MipLevels:   1,
+		ArrayLayers: 1,
+		Samples:     vk.SampleCount1Bit,
+		Tiling:      vk.ImageTilingLinear,
+		Usage:       vk.ImageUsageFlags(vk.ImageUsageSampledBit),
+		InitialLayout: vk.ImageLayoutPreinitialized,
+	}, nil, &image)
+	util.OrPanic(as.NewError(ret))
+	tex.image = image
+
+	var memReqs vk.MemoryRequirements
+	vk.GetImageMemoryRequirements(v.Device, tex.image, &memReqs)
+	memReqs.Deref()
+
+	var memProps vk.PhysicalDeviceMemoryProperties
+	vk.GetPhysicalDeviceMemoryProperties(v.gpuDevices[0], &memProps)
+	memProps.Deref()
+  memoryProps := vk.MemoryPropertyHostVisibleBit|vk.MemoryPropertyHostCoherentBit
+
+	memTypeIndex, _ := as.FindRequiredMemoryTypeFallback(memProps,
+		vk.MemoryPropertyFlagBits(memReqs.MemoryTypeBits), memoryProps)
+	tex.memAlloc = &vk.MemoryAllocateInfo{
+		SType:           vk.StructureTypeMemoryAllocateInfo,
+		AllocationSize:  memReqs.Size,
+		MemoryTypeIndex: memTypeIndex,
+	}
+	var mem vk.DeviceMemory
+	ret = vk.AllocateMemory(v.Device, tex.memAlloc, nil, &mem)
+	util.OrPanic(as.NewError(ret))
+	tex.mem = mem
+	ret = vk.BindImageMemory(v.Device, tex.image, tex.mem, 0)
+	util.OrPanic(as.NewError(ret))
+
+	hostVisible := memoryProps&vk.MemoryPropertyHostVisibleBit != 0
+	if hostVisible {
+		var layout vk.SubresourceLayout
+		vk.GetImageSubresourceLayout(v.Device, tex.image, &vk.ImageSubresource{
+			AspectMask: vk.ImageAspectFlags(vk.ImageAspectColorBit),
+		}, &layout)
+		layout.Deref()
+
+		data, _, _, err := loadTextureData(rawData, int(layout.RowPitch))
+		util.OrPanic(err)
+		if len(data) > 0 {
+			var pData unsafe.Pointer
+			ret = vk.MapMemory(v.Device, tex.mem, 0, vk.DeviceSize(len(data)), 0, &pData)
+			if util.IsError(ret) {
+				log.Printf("vulkan warning: failed to map device memory for data (len=%d)", len(data))
+				return tex
+			}
+			n := vk.Memcopy(pData, data)
+			if n != len(data) {
+				log.Printf("vulkan warning: failed to copy data, %d != %d", n, len(data))
+			}
+			vk.UnmapMemory(v.Device, tex.mem)
+		}
+	}
+
+	// Create sampler
+	var sampler vk.Sampler
+	ret = vk.CreateSampler(v.Device, &vk.SamplerCreateInfo{
+		SType:					vk.StructureTypeSamplerCreateInfo,
+		MagFilter:			vk.FilterNearest,
+		MinFilter:			vk.FilterNearest,
+		MipmapMode:			vk.SamplerMipmapModeNearest,
+		AddressModeU:		vk.SamplerAddressModeClampToEdge,
+		AddressModeV:		vk.SamplerAddressModeClampToEdge,
+		AddressModeW:		vk.SamplerAddressModeClampToEdge,
+		AnisotropyEnable: vk.False,
+		MaxAnisotropy:	1,
+		CompareOp:			vk.CompareOpNever,
+		BorderColor:		vk.BorderColorFloatOpaqueWhite,
+		UnnormalizedCoordinates: vk.False,
+	}, nil, &sampler)
+	util.OrPanic(as.NewError(ret))
+	tex.sampler = sampler
+
+	// Create image view
+	var view vk.ImageView
+	ret = vk.CreateImageView(v.Device, &vk.ImageViewCreateInfo{
+		SType:    vk.StructureTypeImageViewCreateInfo,
+		Image:    tex.image,
+		ViewType: vk.ImageViewType2d,
+		Format:   texFormat,
+		Components: vk.ComponentMapping{
+			R: vk.ComponentSwizzleR,
+			G: vk.ComponentSwizzleG,
+			B: vk.ComponentSwizzleB,
+			A: vk.ComponentSwizzleA,
+		},
+		SubresourceRange: vk.ImageSubresourceRange{
+			AspectMask: vk.ImageAspectFlags(vk.ImageAspectColorBit),
+			LevelCount: 1,
+			LayerCount: 1,
+		},
+	}, nil, &view)
+
+	return tex
+}
+
+
+// s.setImageLayout(tex.image, vk.ImageAspectColorBit,
+// 	vk.ImageLayoutPreinitialized, tex.imageLayout,
+// 	vk.AccessHostWriteBit,
+// 	vk.PipelineStageTopOfPipeBit, vk.PipelineStageFragmentShaderBit)
+
+func (v VulkanDeviceInfo) SetImageLayout(tex *Texture, cmdBuffer vk.CommandBuffer) {
+	if cmdBuffer == nil {
+		util.OrPanic(errors.New("vulkan: command buffer not initialized"))
+	}
+
+	imageMemoryBarrier := vk.ImageMemoryBarrier{
+		SType:         vk.StructureTypeImageMemoryBarrier,
+		SrcAccessMask: vk.AccessFlags(vk.AccessHostWriteBit),
+		DstAccessMask: 0,
+		OldLayout:     vk.ImageLayoutPreinitialized,
+		NewLayout:     tex.imageLayout,
+		SubresourceRange: vk.ImageSubresourceRange{
+			AspectMask: vk.ImageAspectFlags(vk.ImageAspectColorBit),
+			LayerCount: 1,
+			LevelCount: 1,
+		},
+		Image: tex.image,
+	}
+	switch tex.imageLayout {
+	case vk.ImageLayoutTransferDstOptimal:
+		// make sure anything that was copying from this image has completed
+		imageMemoryBarrier.DstAccessMask = vk.AccessFlags(vk.AccessTransferWriteBit)
+	case vk.ImageLayoutColorAttachmentOptimal:
+		imageMemoryBarrier.DstAccessMask = vk.AccessFlags(vk.AccessColorAttachmentWriteBit)
+	case vk.ImageLayoutDepthStencilAttachmentOptimal:
+		imageMemoryBarrier.DstAccessMask = vk.AccessFlags(vk.AccessDepthStencilAttachmentWriteBit)
+	case vk.ImageLayoutShaderReadOnlyOptimal:
+		imageMemoryBarrier.DstAccessMask =
+			vk.AccessFlags(vk.AccessShaderReadBit) | vk.AccessFlags(vk.AccessInputAttachmentReadBit)
+	case vk.ImageLayoutTransferSrcOptimal:
+		imageMemoryBarrier.DstAccessMask = vk.AccessFlags(vk.AccessTransferReadBit)
+	case vk.ImageLayoutPresentSrc:
+		imageMemoryBarrier.DstAccessMask = vk.AccessFlags(vk.AccessMemoryReadBit)
+	default:
+		imageMemoryBarrier.DstAccessMask = 0
+	}
+
+	vk.CmdPipelineBarrier(cmdBuffer,
+		vk.PipelineStageFlags(vk.PipelineStageTopOfPipeBit), vk.PipelineStageFlags(vk.PipelineStageFragmentShaderBit),
+		0, 0, nil, 0, nil, 1, []vk.ImageMemoryBarrier{imageMemoryBarrier})
+}
+
+func loadTextureData(data []byte, rowPitch int) ([]byte, int, int, error) {
+//	data := MustAsset(name)
+	img, err := jpeg.Decode(bytes.NewReader(data))
+	if err != nil {
+	}
+	newImg := image.NewRGBA(img.Bounds())
+	if rowPitch <= 4*img.Bounds().Dy() {
+		// apply the proposed row pitch only if supported,
+		// as we're using only optimal textures.
+		newImg.Stride = rowPitch
+	}
+	draw.Draw(newImg, newImg.Bounds(), img, image.ZP, draw.Src)
+	size := newImg.Bounds().Size()
+	return []byte(newImg.Pix), size.X, size.Y, nil
+}
+
+// func setImageLayout(image vk.Image, aspectMask vk.ImageAspectFlagBits,
+// 	oldImageLayout, newImageLayout vk.ImageLayout,
+// 	srcAccessMask vk.AccessFlagBits,
+// 	srcStages, dstStages vk.PipelineStageFlagBits) {
+
+// 	cmd := s.Context().CommandBuffer()
+// 	if cmd == nil {
+// 		util.OrPanic(errors.New("vulkan: command buffer not initialized"))
+// 	}
+
+// 	imageMemoryBarrier := vk.ImageMemoryBarrier{
+// 		SType:         vk.StructureTypeImageMemoryBarrier,
+// 		SrcAccessMask: vk.AccessFlags(srcAccessMask),
+// 		DstAccessMask: 0,
+// 		OldLayout:     oldImageLayout,
+// 		NewLayout:     newImageLayout,
+// 		SubresourceRange: vk.ImageSubresourceRange{
+// 			AspectMask: vk.ImageAspectFlags(aspectMask),
+// 			LayerCount: 1,
+// 			LevelCount: 1,
+// 		},
+// 		Image: image,
+// 	}
+// 	switch newImageLayout {
+// 	case vk.ImageLayoutTransferDstOptimal:
+// 		// make sure anything that was copying from this image has completed
+// 		imageMemoryBarrier.DstAccessMask = vk.AccessFlags(vk.AccessTransferWriteBit)
+// 	case vk.ImageLayoutColorAttachmentOptimal:
+// 		imageMemoryBarrier.DstAccessMask = vk.AccessFlags(vk.AccessColorAttachmentWriteBit)
+// 	case vk.ImageLayoutDepthStencilAttachmentOptimal:
+// 		imageMemoryBarrier.DstAccessMask = vk.AccessFlags(vk.AccessDepthStencilAttachmentWriteBit)
+// 	case vk.ImageLayoutShaderReadOnlyOptimal:
+// 		imageMemoryBarrier.DstAccessMask =
+// 			vk.AccessFlags(vk.AccessShaderReadBit) | vk.AccessFlags(vk.AccessInputAttachmentReadBit)
+// 	case vk.ImageLayoutTransferSrcOptimal:
+// 		imageMemoryBarrier.DstAccessMask = vk.AccessFlags(vk.AccessTransferReadBit)
+// 	case vk.ImageLayoutPresentSrc:
+// 		imageMemoryBarrier.DstAccessMask = vk.AccessFlags(vk.AccessMemoryReadBit)
+// 	default:
+// 		imageMemoryBarrier.DstAccessMask = 0
+// 	}
+
+// 	vk.CmdPipelineBarrier(cmd,
+// 		vk.PipelineStageFlags(srcStages), vk.PipelineStageFlags(dstStages),
+// 		0, 0, nil, 0, nil, 1, []vk.ImageMemoryBarrier{imageMemoryBarrier})
+// }
