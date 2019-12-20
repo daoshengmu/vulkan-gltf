@@ -369,7 +369,6 @@ func (s *VulkanSwapchainInfo) CreateFramebuffers(renderPass vk.RenderPass, depth
 	}
 	swapchainImages := make([]vk.Image, swapchainImagesCount)
 	vk.GetSwapchainImages(s.Device, s.DefaultSwapchain(), &swapchainImagesCount, swapchainImages)
-
 	// Phase 2: vk.CreateImageView
 	//			create image view for each swapchain image
 

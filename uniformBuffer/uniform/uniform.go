@@ -241,7 +241,7 @@ func createGraphicsPipeline(device vk.Device,
 	inputAssemblyState := vk.PipelineInputAssemblyStateCreateInfo{
 		SType:                  vk.StructureTypePipelineInputAssemblyStateCreateInfo,
 		Topology:               vk.PrimitiveTopologyTriangleList,
-		PrimitiveRestartEnable: vk.True,
+		PrimitiveRestartEnable: vk.False,
 	}
 	vertexInputBindings := []vk.VertexInputBindingDescription{{
 		Binding:   0,
@@ -348,6 +348,7 @@ func VulkanDrawFrame(r VulkanRenderInfo, spinAngle float32) bool {
 		SType:              vk.StructureTypeSubmitInfo,
 		WaitSemaphoreCount: 1,
 		PWaitSemaphores:    r.semaphores,
+		PWaitDstStageMask:  []vk.PipelineStageFlags{vk.PipelineStageFlags(vk.PipelineStageColorAttachmentOutputBit)},
 		CommandBufferCount: 1,
 		PCommandBuffers:    r.cmdBuffers[nextIdx:],
 	}}
@@ -481,15 +482,15 @@ func Initialize(appInfo *vk.ApplicationInfo, window uintptr, instanceExtensions 
 		return r, err
 	}
 
+	err = s.CreateFramebuffers(r.RenderPass, nil)
+	if err != nil {
+		err = fmt.Errorf("renderer.CreateFramebuffers failed with %s", err)
+		return r, err
+	}
 	// We don't use any textures in descriptor.
 	err = s.CreateDescriptorSet(vk.DeviceSize(len(uniformData.Data())), make([]*renderer.Texture, 0, 0))
 	if err != nil {
 		err = fmt.Errorf("renderer.CreateDescriptorSet failed with %s", err)
-		return r, err
-	}
-	err = s.CreateFramebuffers(r.RenderPass, nil)
-	if err != nil {
-		err = fmt.Errorf("renderer.CreateFramebuffers failed with %s", err)
 		return r, err
 	}
 	vb, err = v.CreateVertexBuffers(gVertexData.Data(), uint32(gVertexData.Sizeof()))
@@ -536,6 +537,9 @@ func DestroyInOrder(r *VulkanRenderInfo) {
 
 	vk.FreeCommandBuffers(v.Device, r.cmdPool, uint32(len(r.cmdBuffers)), r.cmdBuffers)
 	r.cmdBuffers = nil
+	for _, fence := range r.fences {
+		vk.DestroyFence(v.Device, fence, nil)
+	}
 
 	vk.DestroyCommandPool(v.Device, r.cmdPool, nil)
 	vk.DestroyRenderPass(v.Device, r.RenderPass, nil)

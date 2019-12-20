@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"runtime"
 	"time"
 
 	"github.com/vulkan-gltf/drawTriangle/triangle"
@@ -18,11 +17,6 @@ var appInfo = &vk.ApplicationInfo{
 	ApplicationVersion: vk.MakeVersion(1, 0, 0),
 	PApplicationName:   "VulkanTriangle\x00",
 	PEngineName:        "vulkangltf.com\x00",
-}
-
-func init() {
-	runtime.LockOSThread()
-	log.SetFlags(log.Lshortfile)
 }
 
 func main() {

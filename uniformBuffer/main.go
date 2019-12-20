@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"runtime"
 	"time"
 
 	"github.com/vulkan-gltf/uniformBuffer/uniform"
@@ -18,11 +17,6 @@ var appInfo = &vk.ApplicationInfo{
 	ApplicationVersion: vk.MakeVersion(1, 0, 0),
 	PApplicationName:   "VulkanUniform\x00",
 	PEngineName:        "vulkangltf.com\x00",
-}
-
-func init() {
-	runtime.LockOSThread()
-	log.SetFlags(log.Lshortfile)
 }
 
 func main() {
@@ -54,7 +48,7 @@ func main() {
 	}
 
 	r, err = uniform.Initialize(appInfo, window.GLFWWindow(), window.GetRequiredInstanceExtensions(),
-														  createSurface, float32(width)/float32(height))
+		createSurface, float32(width)/float32(height))
 	orPanic(err)
 
 	// Some sync logic
