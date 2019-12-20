@@ -4,7 +4,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/vulkan-gltf/drawTriangle/triangle"
+	"github.com/vulkan-samples/drawTriangle/triangle"
 
 	"github.com/vulkan-go/glfw/v3.3/glfw"
 	vk "github.com/vulkan-go/vulkan"

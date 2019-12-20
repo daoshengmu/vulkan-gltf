@@ -4,7 +4,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/vulkan-gltf/uniformBuffer/uniform"
+	"github.com/vulkan-samples/uniformBuffer/uniform"
 
 	"github.com/vulkan-go/glfw/v3.3/glfw"
 	vk "github.com/vulkan-go/vulkan"

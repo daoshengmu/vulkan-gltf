@@ -12,14 +12,14 @@ import (
 
 	as "github.com/vulkan-go/asche"
 	vk "github.com/vulkan-go/vulkan"
-	"github.com/vulkan-gltf/util"
+	"github.com/vulkan-samples/util"
 )
 
 // enableDebug is disabled by default since VK_EXT_debug_report
 // is not guaranteed to be present on a device.
 // Nvidia Shield K1 fw 1.3.0 lacks this extension,
 // on fw 1.2.0 it works fine.
-const enableDebug = false
+const enableDebug = true
 
 type Texture struct {
 	sampler vk.Sampler
@@ -61,6 +61,7 @@ func NewVulkanDevice(appInfo *vk.ApplicationInfo, window uintptr, instanceExtens
 		// "VK_LAYER_LUNARG_parameter_validation\x00",
 		// "VK_LAYER_LUNARG_object_tracker\x00",
 		// "VK_LAYER_LUNARG_core_validation\x00",
+		"VK_LAYER_LUNARG_standard_validation\x00",
 		// "VK_LAYER_LUNARG_api_dump\x00",
 		// "VK_LAYER_LUNARG_image\x00",
 		// "VK_LAYER_LUNARG_swapchain\x00",

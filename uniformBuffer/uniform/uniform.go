@@ -7,8 +7,8 @@ import (
 
 	"github.com/xlab/linmath"
 	vk "github.com/vulkan-go/vulkan"
-	"github.com/vulkan-gltf/renderer"
-	"github.com/vulkan-gltf/util"
+	"github.com/vulkan-samples/renderer"
+	"github.com/vulkan-samples/util"
 )
 
 // // enableDebug is disabled by default since VK_EXT_debug_report
